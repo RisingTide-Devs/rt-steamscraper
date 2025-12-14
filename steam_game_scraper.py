@@ -32,7 +32,7 @@ else:
     }
 
 # Rate limiting
-DELAY_BETWEEN_REQUESTS = 1  # seconds between requests
+DELAY_BETWEEN_REQUESTS = 1 # seconds between requests
 
 
 class SteamScraper:
@@ -68,17 +68,19 @@ class SteamScraper:
         url = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
         all_apps = []
         last_appid = 0
-        batch_size = 20000
+        batch_size = 50000
         
         print("Fetching apps in batches...")
         
         while True:
-            self._rate_limit()
+            time.sleep(DELAY_BETWEEN_REQUESTS)
             
             params = {
                 'key': STEAM_API_KEY,
                 'max_results': batch_size,
-                'last_appid': last_appid
+                'last_appid': last_appid,
+                'include_dlc': True,
+                'include_software': True
             }
             
             try:
@@ -87,18 +89,21 @@ class SteamScraper:
                 data = response.json()
                 
                 apps = data.get('response', {}).get('apps', [])
+                have_more = data.get('response', {}).get('have_more_results', False)
                 
                 if not apps:
                     # No more apps to fetch
+                    print(f"  No more apps returned. API response: {data.get('response', {})}")
                     break
                 
                 all_apps.extend(apps)
                 last_appid = apps[-1]['appid']
                 
-                print(f"  Fetched {len(apps)} apps (total: {len(all_apps)}, last ID: {last_appid})")
+                print(f"  Fetched {len(apps)} apps (total: {len(all_apps)}, last ID: {last_appid}, have_more: {have_more})")
                 
-                # If we got fewer apps than requested, we've reached the end
-                if len(apps) < batch_size:
+                # Check if there are more results
+                if not have_more:
+                    print(f"  API indicates no more results. Final response keys: {data.get('response', {}).keys()}")
                     break
                     
             except Exception as e:
@@ -130,9 +135,8 @@ def main():
         apps = scraper.get_app_list()
         print(f"Found {len(apps)} apps on Steam")
         
-        # Scrape details for each app (you may want to limit this)
-        # For testing, let's just do the first 10
-        apps_to_scrape = apps
+        # Scrape details for each app
+        apps_to_scrape = apps  # Scrape all apps
         
         # Count stats
         insert_count = 0

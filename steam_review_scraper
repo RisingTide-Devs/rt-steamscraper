@@ -1,0 +1,239 @@
+"""
+Steam Reviews Scraper
+Scrapes reviews from Steam store pages and stores them in the database.
+"""
+
+import os
+import time
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+from typing import List, Dict, Optional
+from dotenv import load_dotenv
+from database_manager import DatabaseManager
+
+# Load environment variables
+load_dotenv()
+
+# Configuration
+DB_URL = os.getenv('DB_URL')
+DELAY_BETWEEN_REQUESTS = 2.0  # seconds between requests
+
+
+class ReviewsScraper:
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        })
+    
+    def get_reviews_from_page(self, app_id: int) -> List[Dict]:
+        """Scrape reviews from Steam store page"""
+        url = f"https://steamcommunity.com/app/{app_id}/reviews/"
+        params = {
+            'browsefilter': 'mostrecent',
+            'filterLanguage': 'english',
+            'p': 1
+        }
+        
+        reviews = []
+        
+        try:
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+            
+            response = self.session.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find all review containers
+            review_containers = soup.find_all('div', class_='apphub_Card')
+            
+            for container in review_containers:
+                try:
+                    review_data = self._parse_review(container, app_id)
+                    if review_data:
+                        reviews.append(review_data)
+                except Exception as e:
+                    print(f"  Error parsing review: {e}")
+                    continue
+            
+            print(f"  Scraped {len(reviews)} reviews from page")
+            
+        except Exception as e:
+            print(f"  Error fetching reviews page: {e}")
+        
+        return reviews
+    
+    def _parse_review(self, container, app_id: int) -> Optional[Dict]:
+        """Parse a single review from HTML"""
+        try:
+            # Get review ID
+            review_id_elem = container.get('data-recommendationid')
+            if not review_id_elem:
+                return None
+            
+            # Get vote (recommended or not)
+            vote_elem = container.find('div', class_='title')
+            voted_up = 'Recommended' in vote_elem.text if vote_elem else False
+            
+            # Get review text
+            review_text_elem = container.find('div', class_='apphub_CardTextContent')
+            review_text = review_text_elem.text.strip() if review_text_elem else ""
+            
+            # Get author info
+            author_elem = container.find('div', class_='apphub_CardContentAuthorName')
+            author_link = author_elem.find('a') if author_elem else None
+            author_url = author_link.get('href', '') if author_link else ''
+            
+            # Extract Steam ID from URL (format: https://steamcommunity.com/profiles/[steamid])
+            author_steamid = None
+            if '/profiles/' in author_url:
+                author_steamid = author_url.split('/profiles/')[-1].split('/')[0]
+            elif '/id/' in author_url:
+                # Vanity URL, we'll just store None
+                author_steamid = None
+            
+            # Get playtime
+            hours_elem = container.find('div', class_='hours')
+            playtime_text = hours_elem.text.strip() if hours_elem else "0 hrs"
+            
+            # Parse hours (format: "X.X hrs on record" or "X,XXX.X hrs on record")
+            playtime_forever = 0
+            if 'hrs' in playtime_text:
+                try:
+                    hours_str = playtime_text.split('hrs')[0].strip().replace(',', '')
+                    playtime_forever = int(float(hours_str) * 60)  # Convert to minutes
+                except:
+                    playtime_forever = 0
+            
+            # Get date posted
+            date_elem = container.find('div', class_='date_posted')
+            date_text = date_elem.text.strip().replace('Posted: ', '') if date_elem else None
+            
+            # Parse date (format: "1 Jan, 2024" or "1 Jan @ 3:00pm")
+            timestamp_created = None
+            if date_text:
+                try:
+                    # Remove time portion if present
+                    date_only = date_text.split('@')[0].strip()
+                    # Try to parse the date
+                    timestamp_created = datetime.strptime(date_only, '%d %b, %Y')
+                except:
+                    try:
+                        # Try alternative format
+                        timestamp_created = datetime.strptime(date_only, '%d %b')
+                        # Add current year if no year specified
+                        timestamp_created = timestamp_created.replace(year=datetime.now().year)
+                    except:
+                        timestamp_created = None
+            
+            # Get votes
+            votes_elem = container.find('div', class_='found_helpful')
+            votes_up = 0
+            votes_funny = 0
+            
+            if votes_elem:
+                votes_text = votes_elem.text.strip()
+                # Parse "X people found this review helpful" and "Y people found this review funny"
+                if 'helpful' in votes_text:
+                    try:
+                        votes_up = int(votes_text.split('people')[0].strip().replace(',', ''))
+                    except:
+                        votes_up = 0
+                if 'funny' in votes_text:
+                    try:
+                        funny_text = votes_text.split('funny')[0].split()[-1]
+                        votes_funny = int(funny_text.replace(',', ''))
+                    except:
+                        votes_funny = 0
+            
+            # Check if Steam purchase
+            purchase_elem = container.find('div', class_='received_compensation')
+            steam_purchase = purchase_elem is None  # If no "received for free" badge, it's a purchase
+            
+            return {
+                'steam_product_id': app_id,
+                'review_id': review_id_elem,
+                'author_steamid': author_steamid,
+                'author_playtime_forever': playtime_forever,
+                'author_playtime_last_two_weeks': None,  # Not available from page scraping
+                'author_num_games_owned': None,  # Not available from page scraping
+                'author_num_reviews': None,  # Not available from page scraping
+                'language': 'english',  # We filtered for English
+                'review': review_text,
+                'timestamp_created': timestamp_created,
+                'timestamp_updated': None,  # Not available from page scraping
+                'voted_up': voted_up,
+                'votes_up': votes_up,
+                'votes_funny': votes_funny,
+                'weighted_vote_score': None,  # Not available from page scraping
+                'comment_count': 0,  # Not available from page scraping
+                'steam_purchase': steam_purchase,
+                'received_for_free': not steam_purchase,
+                'written_during_early_access': False,  # Not easily detectable
+                'created_at': datetime.now()
+            }
+            
+        except Exception as e:
+            print(f"    Error parsing review container: {e}")
+            return None
+    
+    def scrape_app_reviews(self, app_id: int):
+        """Scrape all reviews for a specific app"""
+        print(f"\nScraping reviews for app {app_id}...")
+        
+        reviews = self.get_reviews_from_page(app_id)
+        
+        success_count = 0
+        for review in reviews:
+            if self.db.save_review(review):
+                success_count += 1
+        
+        print(f"  Saved {success_count}/{len(reviews)} reviews")
+        return success_count
+
+
+def main():
+    """Main scraping function"""
+    print("Starting Steam Reviews Scraper...")
+    
+    # Initialize database manager
+    db = DatabaseManager(DB_URL)
+    db.connect()
+    
+    # Initialize scraper with database manager
+    scraper = ReviewsScraper(db)
+    
+    try:
+        # Get apps to scrape (limit to 10 for testing)
+        apps = db.get_apps_to_scrape(limit=10)
+        print(f"Found {len(apps)} apps to scrape")
+        
+        total_reviews = 0
+        
+        for i, app_id in enumerate(apps, 1):
+            print(f"\n[{i}/{len(apps)}] App ID: {app_id}")
+            count = scraper.scrape_app_reviews(app_id)
+            total_reviews += count
+        
+        print(f"\n{'='*60}")
+        print(f"SCRAPING COMPLETE")
+        print(f"{'='*60}")
+        print(f"Total apps processed: {len(apps)}")
+        print(f"Total reviews scraped: {total_reviews}")
+        print(f"{'='*60}")
+        
+    except KeyboardInterrupt:
+        print("\n\nScraping interrupted by user")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        db.disconnect()
+
+
+if __name__ == "__main__":
+    main()

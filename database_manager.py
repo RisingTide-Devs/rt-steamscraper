@@ -3,21 +3,27 @@ Database Manager for Steam Scraper
 Handles all PostgreSQL database operations.
 """
 
+import os
 import psycopg2
 from psycopg2.extras import Json
 from datetime import datetime
 from typing import Dict, Optional
 
+# Configuration
+TABLE_NAME = 'steam_products_test'  # Change this to point to a different table
+
 
 class DatabaseManager:
-    def __init__(self, config):
+    def __init__(self, config, table_name=None):
         """
         Initialize DatabaseManager with connection config.
         
         Args:
             config: Either a connection URL string or a dict with connection parameters
+            table_name: Name of the table to use (default: uses TABLE_NAME from module config)
         """
         self.config = config
+        self.table_name = table_name or TABLE_NAME
         self.conn = None
         self.cursor = None
     
@@ -43,7 +49,8 @@ class DatabaseManager:
     def get_existing_app_ids(self) -> set:
         """Get set of all existing steam_app_id values in database."""
         try:
-            self.cursor.execute("SELECT steam_app_id FROM steam_products WHERE steam_app_id IS NOT NULL")
+            query = f"SELECT steam_app_id FROM {self.table_name} WHERE steam_app_id IS NOT NULL"
+            self.cursor.execute(query)
             return {row[0] for row in self.cursor.fetchall()}
         except Exception as e:
             print(f"Error fetching existing app IDs: {e}")
@@ -52,10 +59,8 @@ class DatabaseManager:
     def app_exists(self, app_id: int) -> bool:
         """Check if app already exists in database."""
         try:
-            self.cursor.execute(
-                "SELECT 1 FROM steam_products WHERE steam_app_id = %s LIMIT 1",
-                (app_id,)
-            )
+            query = f"SELECT 1 FROM {self.table_name} WHERE steam_app_id = %s LIMIT 1"
+            self.cursor.execute(query, (app_id,))
             return self.cursor.fetchone() is not None
         except Exception as e:
             print(f"Error checking if app exists: {e}")
@@ -89,8 +94,8 @@ class DatabaseManager:
             app_id = app_data.get('steam_appid')
             existed = self.app_exists(app_id)
             
-            query = """
-            INSERT INTO steam_products (
+            query = f"""
+            INSERT INTO {self.table_name} (
                 steam_app_id, name, type, description, short_description,
                 detailed_description, header_image, capsule_image,
                 screenshots, movies, release_date, coming_soon,
@@ -141,7 +146,7 @@ class DatabaseManager:
                 controller_support = EXCLUDED.controller_support,
                 updated_at = EXCLUDED.updated_at,
                 last_scraped = EXCLUDED.last_scraped
-            WHERE steam_products.steam_app_id = EXCLUDED.steam_app_id
+            WHERE {self.table_name}.steam_app_id = EXCLUDED.steam_app_id
             """
             
             now = datetime.now()
