@@ -10,20 +10,23 @@ from datetime import datetime
 from typing import Dict, Optional
 
 # Configuration
-TABLE_NAME = 'steam_products_test'  # Change this to point to a different table
+PRODUCTS_TABLE_NAME = 'steam_products'  # Change this to point to a different products table
+REVIEWS_TABLE_NAME = 'steam_reviews'  # Change this to point to a different reviews table
 
 
 class DatabaseManager:
-    def __init__(self, config, table_name=None):
+    def __init__(self, config, products_table_name=None, reviews_table_name=None):
         """
         Initialize DatabaseManager with connection config.
         
         Args:
             config: Either a connection URL string or a dict with connection parameters
-            table_name: Name of the table to use (default: uses TABLE_NAME from module config)
+            products_table_name: Name of the products table to use (default: uses PRODUCTS_TABLE_NAME from module config)
+            reviews_table_name: Name of the reviews table to use (default: uses REVIEWS_TABLE_NAME from module config)
         """
         self.config = config
-        self.table_name = table_name or TABLE_NAME
+        self.products_table_name = products_table_name or PRODUCTS_TABLE_NAME
+        self.reviews_table_name = reviews_table_name or REVIEWS_TABLE_NAME
         self.conn = None
         self.cursor = None
     
@@ -49,7 +52,7 @@ class DatabaseManager:
     def get_existing_app_ids(self) -> set:
         """Get set of all existing steam_app_id values in database."""
         try:
-            query = f"SELECT steam_app_id FROM {self.table_name} WHERE steam_app_id IS NOT NULL"
+            query = f"SELECT steam_app_id FROM {self.products_table_name} WHERE steam_app_id IS NOT NULL"
             self.cursor.execute(query)
             return {row[0] for row in self.cursor.fetchall()}
         except Exception as e:
@@ -59,7 +62,7 @@ class DatabaseManager:
     def app_exists(self, app_id: int) -> bool:
         """Check if app already exists in database."""
         try:
-            query = f"SELECT 1 FROM {self.table_name} WHERE steam_app_id = %s LIMIT 1"
+            query = f"SELECT 1 FROM {self.products_table_name} WHERE steam_app_id = %s LIMIT 1"
             self.cursor.execute(query, (app_id,))
             return self.cursor.fetchone() is not None
         except Exception as e:
@@ -95,7 +98,7 @@ class DatabaseManager:
             existed = self.app_exists(app_id)
             
             query = f"""
-            INSERT INTO {self.table_name} (
+            INSERT INTO {self.products_table_name} (
                 steam_app_id, name, type, description, short_description,
                 detailed_description, header_image, capsule_image,
                 screenshots, movies, release_date, coming_soon,
@@ -146,7 +149,7 @@ class DatabaseManager:
                 controller_support = EXCLUDED.controller_support,
                 updated_at = EXCLUDED.updated_at,
                 last_scraped = EXCLUDED.last_scraped
-            WHERE {self.table_name}.steam_app_id = EXCLUDED.steam_app_id
+            WHERE {self.products_table_name}.steam_app_id = EXCLUDED.steam_app_id
             """
             
             now = datetime.now()
@@ -199,3 +202,86 @@ class DatabaseManager:
             print(f"Error inserting/updating product {app_data.get('steam_appid')}: {e}")
             self.conn.rollback()
             return False, 'failed'
+    
+    def save_review(self, review_data: Dict) -> bool:
+        """
+        Save review to steam_reviews table.
+        
+        Args:
+            review_data: Dictionary containing review details
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            query = f"""
+            INSERT INTO {self.reviews_table_name} (
+                steam_product_id, review_id, author_steamid,
+                author_playtime_forever, author_playtime_last_two_weeks,
+                author_num_games_owned, author_num_reviews, language,
+                review, timestamp_created, timestamp_updated, voted_up,
+                votes_up, votes_funny, weighted_vote_score, comment_count,
+                steam_purchase, received_for_free, written_during_early_access,
+                created_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (review_id) DO UPDATE SET
+                votes_up = EXCLUDED.votes_up,
+                votes_funny = EXCLUDED.votes_funny,
+                review = EXCLUDED.review
+            """
+            
+            values = (
+                review_data['steam_product_id'],
+                review_data['review_id'],
+                review_data['author_steamid'],
+                review_data['author_playtime_forever'],
+                review_data['author_playtime_last_two_weeks'],
+                review_data['author_num_games_owned'],
+                review_data['author_num_reviews'],
+                review_data['language'],
+                review_data['review'],
+                review_data['timestamp_created'],
+                review_data['timestamp_updated'],
+                review_data['voted_up'],
+                review_data['votes_up'],
+                review_data['votes_funny'],
+                review_data['weighted_vote_score'],
+                review_data['comment_count'],
+                review_data['steam_purchase'],
+                review_data['received_for_free'],
+                review_data['written_during_early_access'],
+                review_data['created_at']
+            )
+            
+            self.cursor.execute(query, values)
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            print(f"Error saving review {review_data.get('review_id')}: {e}")
+            print(f"  Review data keys: {list(review_data.keys())}")
+            print(f"  Sample values: steam_product_id={review_data.get('steam_product_id')}, review_id={review_data.get('review_id')}")
+            import traceback
+            traceback.print_exc()
+            self.conn.rollback()
+            return False
+    
+    def get_existing_review_ids(self, app_id: int) -> set:
+        """
+        Get set of existing review IDs for a specific app.
+        
+        Args:
+            app_id: Steam app ID
+            
+        Returns:
+            Set of review IDs that already exist in database
+        """
+        try:
+            query = f"SELECT review_id FROM {self.reviews_table_name} WHERE steam_product_id = %s"
+            self.cursor.execute(query, (app_id,))
+            return {row[0] for row in self.cursor.fetchall()}
+        except Exception as e:
+            print(f"Error fetching existing review IDs for app {app_id}: {e}")
+            return set()
