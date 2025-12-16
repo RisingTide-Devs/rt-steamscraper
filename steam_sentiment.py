@@ -2,6 +2,7 @@
 """
 Sentiment Analysis for Steam Reviews
 Analyzes reviews from database using local Ollama instance
+Skips already-analyzed reviews
 """
 
 import json
@@ -190,6 +191,17 @@ def align_to_sentence_boundary(chunk: str) -> str:
     return chunk
 
 
+def check_already_analyzed(db, user_id, game_name):
+    """Check if this user's review for this game has already been analyzed"""
+    query = """
+    SELECT COUNT(*) FROM sentiment_analysis 
+    WHERE user_id = %s AND from_game = %s
+    """
+    db.cursor.execute(query, (user_id, game_name))
+    count = db.cursor.fetchone()[0]
+    return count > 0
+
+
 def insert_sentiment_data(db, analysis_data, review_id, game_name, user_id):
     """Insert sentiment analysis data into database"""
     try:
@@ -351,12 +363,13 @@ def main():
     db.cursor.execute(query, tuple(app_ids))
     reviews = db.cursor.fetchall()
     
-    print(f"📊 Found {len(reviews)} reviews to analyze\n")
+    print(f"📊 Found {len(reviews)} reviews to process\n")
     
     # Process reviews sequentially
     results = []
     success_count = 0
     failed_count = 0
+    skipped_count = 0
     
     for idx, row in enumerate(reviews, 1):
         review_data = {
@@ -375,6 +388,21 @@ def main():
         print(f"  Game: {review_data['game_name']}")
         print(f"  Author: {review_data['author_steamid']}")
         print(f"  Text length: {len(review_data['review_text'])} characters")
+        
+        # Check if already analyzed
+        if check_already_analyzed(db, review_data['author_steamid'], review_data['game_name']):
+            print(f"  ⏭️  SKIPPED - Already analyzed")
+            skipped_count += 1
+            
+            # Progress summary every 10 reviews
+            if idx % 10 == 0:
+                print(f"\n{'─'*80}")
+                print(f"📈 Progress Update: {idx}/{len(reviews)} reviews processed")
+                print(f"   ✅ Successful: {success_count}")
+                print(f"   ⏭️  Skipped: {skipped_count}")
+                print(f"   ❌ Failed: {failed_count}")
+                print(f"{'─'*80}")
+            continue
         
         try:
             # Analyze the review
@@ -404,6 +432,7 @@ def main():
                 print(f"\n{'─'*80}")
                 print(f"📈 Progress Update: {idx}/{len(reviews)} reviews processed")
                 print(f"   ✅ Successful: {success_count}")
+                print(f"   ⏭️  Skipped: {skipped_count}")
                 print(f"   ❌ Failed: {failed_count}")
                 print(f"{'─'*80}")
                 
@@ -430,6 +459,7 @@ def main():
     print(f"SENTIMENT ANALYSIS COMPLETE")
     print(f"{'='*80}")
     print(f"  ✅ Successful: {success_count}")
+    print(f"  ⏭️  Skipped (already analyzed): {skipped_count}")
     print(f"  ❌ Failed: {failed_count}")
     print(f"  📊 Total: {len(reviews)}")
     print(f"  📁 Output: {output_filename}")
