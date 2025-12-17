@@ -58,6 +58,39 @@ def create_circular_layout(n):
     return positions
 
 
+def get_label_offset(x1, y1, x2, y2, offset=0.15):
+    """Calculate offset position for edge label to avoid center overlap"""
+    # Get midpoint
+    mid_x = (x1 + x2) / 2
+    mid_y = (y1 + y2) / 2
+    
+    # Calculate distance from center
+    dist = math.sqrt(mid_x**2 + mid_y**2)
+    
+    # If close to center, push outward
+    if dist < 0.3:  # Very close to center
+        # Push along the perpendicular to the line
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.sqrt(dx**2 + dy**2)
+        
+        if length > 0:
+            # Perpendicular vector
+            perp_x = -dy / length
+            perp_y = dx / length
+            
+            # Offset the label
+            mid_x += perp_x * offset
+            mid_y += perp_y * offset
+    elif dist < 0.6:  # Somewhat close to center
+        # Push radially outward
+        if dist > 0:
+            mid_x = mid_x / dist * (dist + offset)
+            mid_y = mid_y / dist * (dist + offset)
+    
+    return mid_x, mid_y
+
+
 def main():
     """Generate user overlap graph"""
     
@@ -154,10 +187,10 @@ def main():
         # Draw line
         ax.plot([x1, x2], [y1, y2], 'gray', linewidth=width, alpha=0.5, zorder=1)
         
-        # Add label at midpoint
-        mid_x = (x1 + x2) / 2
-        mid_y = (y1 + y2) / 2
-        ax.text(mid_x, mid_y, str(overlap_count), 
+        # Calculate offset label position (SMART LABELING)
+        label_x, label_y = get_label_offset(x1, y1, x2, y2, offset=0.15)
+        
+        ax.text(label_x, label_y, str(overlap_count), 
                 fontsize=8, ha='center', va='center',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'),
                 zorder=3)
@@ -217,24 +250,6 @@ def main():
                    f'{overlap["pct1"]:.2f},{overlap["pct2"]:.2f}\n')
     
     print(f"\n💾 Overlap data saved to: {csv_file}")
-    
-    # Create bar chart of overlaps
-    if overlaps_sorted:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        labels = [f"{o['game1'][:15]}↔{o['game2'][:15]}" for o in overlaps_sorted[:10]]
-        values = [o['overlap'] for o in overlaps_sorted[:10]]
-        
-        ax.barh(labels, values, color='steelblue', alpha=0.7)
-        ax.set_xlabel('Number of Overlapping Users', fontsize=12)
-        ax.set_title('Top 10 Game Pairs by User Overlap', fontsize=14, fontweight='bold')
-        ax.grid(axis='x', alpha=0.3)
-        
-        plt.tight_layout()
-        bar_file = 'user_overlap_bar_chart.png'
-        plt.savefig(bar_file, dpi=300, bbox_inches='tight', facecolor='white')
-        print(f"💾 Bar chart saved to: {bar_file}")
-        plt.close()
     
     db.disconnect()
     
