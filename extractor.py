@@ -23,14 +23,54 @@ def parse_json_field(field):
     """Safely parse a JSON field that might be string, list, or None"""
     if field is None:
         return []
-    if isinstance(field, str):
-        try:
-            return json.loads(field)
-        except:
-            return []
+    
+    # If it's already a list, return it
     if isinstance(field, list):
         return field
+    
+    # If it's a string, try to parse it
+    if isinstance(field, str):
+        # Remove whitespace
+        field = field.strip()
+        
+        # Empty string
+        if not field:
+            return []
+        
+        # Try parsing as JSON
+        try:
+            parsed = json.loads(field)
+            if isinstance(parsed, list):
+                return parsed
+            elif isinstance(parsed, dict):
+                return [parsed]
+            else:
+                return []
+        except json.JSONDecodeError:
+            # If it's not valid JSON, return empty
+            return []
+    
     return []
+
+
+def format_category_genre_list(items):
+    """Format a list of category/genre items into a readable string"""
+    if not items:
+        return ''
+    
+    result = []
+    for item in items:
+        if isinstance(item, dict):
+            # Try to get 'description' field first, then 'name', then 'id'
+            desc = item.get('description', item.get('name', item.get('id', '')))
+            if desc:
+                result.append(str(desc))
+        elif isinstance(item, str):
+            result.append(item)
+        else:
+            result.append(str(item))
+    
+    return ', '.join(result)
 
 
 def create_product_data_sheet(wb, db, app_ids):
@@ -91,8 +131,15 @@ def create_product_data_sheet(wb, db, app_ids):
         categories_list = parse_json_field(categories_json)
         genres_list = parse_json_field(genres_json)
         
-        categories = ', '.join([c.get('description', '') if isinstance(c, dict) else str(c) for c in categories_list])
-        genres = ', '.join([g.get('description', '') if isinstance(g, dict) else str(g) for g in genres_list])
+        # Format as readable strings
+        categories = format_category_genre_list(categories_list)
+        genres = format_category_genre_list(genres_list)
+        
+        # Debug output
+        if not categories and not genres:
+            print(f"  ⚠️  Warning: {name} (ID: {app_id}) has no categories or genres")
+            print(f"     Raw categories: {repr(categories_json)}")
+            print(f"     Raw genres: {repr(genres_json)}")
         
         row = [
             app_id,
