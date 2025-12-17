@@ -52,8 +52,9 @@ def create_circular_layout(n):
     positions = {}
     for i in range(n):
         angle = 2 * math.pi * i / n
-        x = math.cos(angle)
-        y = math.sin(angle)
+        # Much smaller radius to bring nodes closer together
+        x = 0.5 * math.cos(angle)
+        y = 0.5 * math.sin(angle)
         positions[i] = (x, y)
     return positions
 
@@ -187,33 +188,33 @@ def main():
         # Draw line
         ax.plot([x1, x2], [y1, y2], 'gray', linewidth=width, alpha=0.5, zorder=1)
         
-        # Calculate offset label position (SMART LABELING)
-        label_x, label_y = get_label_offset(x1, y1, x2, y2, offset=0.15)
+        # Calculate offset label position (SMART LABELING to avoid center overlap)
+        label_x, label_y = get_label_offset(x1, y1, x2, y2, offset=0.12)
         
         ax.text(label_x, label_y, str(overlap_count), 
-                fontsize=8, ha='center', va='center',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'),
+                fontsize=10, ha='center', va='center', fontweight='bold',
+                color='black',
                 zorder=3)
     
     # Draw nodes (games)
     for idx, game in game_data.items():
         x, y = positions[idx]
         
-        # Node size based on user count
-        size = 200 + (game['total_users'] / max_users) * 1000
+        # Smaller circle radius
+        radius = 0.10
         
         # Draw circle
-        circle = plt.Circle((x, y), radius=0.15, color='lightblue', 
+        circle = plt.Circle((x, y), radius=radius, color='lightblue', 
                            edgecolor='black', linewidth=2, alpha=0.7, zorder=2)
         ax.add_patch(circle)
         
         # Add game name and user count
         ax.text(x, y, f"{game['name']}\n({game['total_users']} users)", 
-                fontsize=9, ha='center', va='center', fontweight='bold', zorder=4)
+                fontsize=7, ha='center', va='center', fontweight='bold', zorder=4)
     
-    # Set axis properties
-    ax.set_xlim(-1.8, 1.8)
-    ax.set_ylim(-1.8, 1.8)
+    # Set axis properties - very tight limits to eliminate empty space
+    ax.set_xlim(-0.85, 0.85)
+    ax.set_ylim(-0.85, 0.85)
     ax.set_aspect('equal')
     ax.axis('off')
     

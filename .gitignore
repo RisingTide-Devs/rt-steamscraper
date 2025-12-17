@@ -1,4 +1,5 @@
 .env
-.xlsx
-.csv
-.png
+*.xlsx
+*.csv
+*.png
+/sentimentGraph
